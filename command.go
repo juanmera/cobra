@@ -366,7 +366,9 @@ func (c *Command) initHelp() {
 			Run: c.HelpFunc(),
 		}
 	}
-	c.AddCommand(c.helpCommand)
+	if c.HasSubCommands() {
+		c.AddCommand(c.helpCommand)
+	}
 }
 
 // Used for testing
