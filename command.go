@@ -185,20 +185,19 @@ func (c *Command) UsageTemplate() string {
 	if c.HasParent() {
 		return c.parent.UsageTemplate()
 	} else {
-		return `{{ $cmd := . }}
-Usage: {{if .Runnable}}
+		return `{{ $cmd := . }}Usage: {{if .Runnable}}
   {{.UseLine}}{{if .HasFlags}} [flags]{{end}}{{end}}{{if .HasSubCommands}}
-  {{ .CommandPath}} [command]{{end}}
-{{ if .HasSubCommands}}
+  {{.CommandPath}} [command]{{end}}
+{{if .HasSubCommands}}
 Available Commands: {{range .Commands}}{{if .Runnable}}
   {{rpad .Use .UsagePadding }} :: {{.Short}}{{end}}{{end}}
 {{end}}
-{{ if .HasFlags}}Available Flags:
+{{if .HasFlags}}Available Flags:
 {{.Flags.FlagUsages}}{{end}}{{if .HasParent}}{{if and (gt .Commands 0) (gt .Parent.Commands 1) }}
 Additional help topics: {{if gt .Commands 0 }}{{range .Commands}}{{if not .Runnable}} {{rpad .CommandPath .CommandPathPadding}} :: {{.Short}}{{end}}{{end}}{{end}}{{if gt .Parent.Commands 1 }}{{range .Parent.Commands}}{{if .Runnable}}{{if not (eq .Name $cmd.Name) }}{{end}}
   {{rpad .CommandPath .CommandPathPadding}} :: {{.Short}}{{end}}{{end}}{{end}}{{end}}
-{{end}}
-Use "{{.Root.Name}} help [command]" for more information about that command.
+{{end}}{{if .HasSubCommands}}
+Use "{{.Root.Name}} help [command]" for more information about that command.{{end}}
 `
 	}
 }
