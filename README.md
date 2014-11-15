@@ -7,7 +7,7 @@ A Commander for modern go CLI interactions
 ## Overview
 
 Cobra is a commander providing a simple interface to create powerful modern CLI
-interfaces similar to git & go tools. In addition to providing an iterface, Cobra
+interfaces similar to git & go tools. In addition to providing an interface, Cobra
 simultaneously provides a controller to organize your application code.
 
 Inspired by go, go-Commander, gh and subcommand, Cobra improves on these by
@@ -17,6 +17,13 @@ all commands.
 
 Cobra has an exceptionally clean interface and simple design without needless
 constructors or initialization methods.
+
+Applications built with Cobra commands are designed to be as user friendly as
+possible. Flags can be placed before or after the command (as long as a
+confusing space isn’t provided). Both short and long flags can be used. A
+command need not even be fully typed. The shortest unambiguous string will
+suffice. Help is automatically generated and available for the application or
+for a specific command using either the help command or the --help flag.
 
 ## Concepts
 
@@ -106,7 +113,7 @@ Additional commands can be defined.
         },
     }
 
-### Attach command to it's parent
+### Attach command to its parent
 In this example we are attaching it to the root, but commands can be attached at any level.
 
 	HugoCmd.AddCommand(versionCmd)
@@ -144,7 +151,7 @@ Execute should be run on the root for clarity, though it can be called on any co
 
 In the example below we have defined three commands. Two are at the top level
 and one (cmdTimes) is a child of one of the top commands. In this case the root
-is not executible meaning that a subcommand is required. This is accomplished
+is not executable meaning that a subcommand is required. This is accomplished
 by not providing a 'Run' for the 'rootCmd'.
 
 We have only defined one flag for a single command.
@@ -283,14 +290,13 @@ You can provide your own command, function or template through the following met
 
 The latter two will also apply to any children commands.
 
-
 ## Usage
 
 When the user provides an invalid flag or invalid command Cobra responds by
 showing the user the 'usage'
 
 ### Example
-You may recognize this from the help above. That's because the default help 
+You may recognize this from the help above. That's because the default help
 embeds the usage as part of it's output.
 
     Usage:
@@ -298,11 +304,11 @@ embeds the usage as part of it's output.
       hugo [command]
 
     Available Commands:
-      server          :: Hugo runs it's own a webserver to render the files
-      version         :: Print the version number of Hugo
-      check           :: Check content in the source directory
-      benchmark       :: Benchmark hugo by building a site a number of times
-      help [command]  :: Help about any command
+      server          Hugo runs it's own a webserver to render the files
+      version         Print the version number of Hugo
+      check           Check content in the source directory
+      benchmark       Benchmark hugo by building a site a number of times
+      help [command]  Help about any command
 
      Available Flags:
       -b, --base-url="": hostname (and path) to the root eg. http://spf13.com/
@@ -332,7 +338,22 @@ Like help the function and template are over ridable through public methods.
     command.SetUsageTemplate(s string)
 
 
+## Debugging
+
+Cobra provides a ‘DebugFlags’ method on a command which when called will print
+out everything Cobra knows about the flags for each command
+
+### Example
+
+    command.DebugFlags()
+
 ## Release Notes
+* **0.9.0** June 17, 2014
+  * flags can appears anywhere in the args (provided they are unambiguous)
+  * --help prints usage screen for app or command
+  * Prefix matching for commands
+  * Cleaner looking help and usage output
+  * Extensive test suite
 * **0.8.0** Nov 5, 2013
   * Reworked interface to remove commander completely
   * Command now primary structure
@@ -369,7 +390,7 @@ Names in no particular order:
 
 ## License
 
-nitro is released under the Apache 2.0 license. See [LICENSE.txt](https://github.com/spf13/nitro/blob/master/LICENSE.txt)
+Cobra is released under the Apache 2.0 license. See [LICENSE.txt](https://github.com/spf13/cobra/blob/master/LICENSE.txt)
 
 
 [![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/spf13/cobra/trend.png)](https://bitdeli.com/free "Bitdeli Badge")

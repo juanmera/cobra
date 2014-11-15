@@ -35,6 +35,8 @@ type Command struct {
 	name string
 	// The one-line usage message.
 	Use string
+	// An array of aliases that can be used instead of the first word in Use.
+	Aliases []string
 	// The short description shown in the 'help' output.
 	Short string
 	// The long message shown in the 'help <this-command>' output.
@@ -57,12 +59,13 @@ type Command struct {
 	flagErrorBuf *bytes.Buffer
 
 	args          []string
-	output        *io.Writer               // nil means stderr; use out() accessor
+	output        *io.Writer               // nil means stderr; use Out() method instead
 	usageFunc     func(*Command) error     // Usage can be defined by application
 	usageTemplate string                   // Can be defined by Application
 	helpTemplate  string                   // Can be defined by Application
 	helpFunc      func(*Command, []string) // Help can be defined by application
 	helpCommand   *Command                 // The help command
+	helpFlagVal   bool
 }
 
 // os.Args[1:] by default, if desired, can be overridden
@@ -138,7 +141,7 @@ func (c *Command) HelpFunc() func(*Command, []string) {
 		return func(c *Command, args []string) {
 			if len(args) == 0 {
 				// Help called without any topic, calling on root
-				c.Root().Usage()
+				c.Root().Help()
 				return
 			}
 
@@ -187,18 +190,20 @@ func (c *Command) UsageTemplate() string {
 	} else {
 		return `{{ $cmd := . }}Usage: {{if .Runnable}}
   {{.UseLine}}{{if .HasFlags}} [flags]{{end}}{{end}}{{if .HasSubCommands}}
-  {{.CommandPath}} [command]{{end}}
+  {{.CommandPath}} [command]{{end}}{{if gt .Aliases 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}
 {{if .HasSubCommands}}
 Available Commands: {{range .Commands}}{{if .Runnable}}
-  {{rpad .Use .UsagePadding }} :: {{.Short}}{{end}}{{end}}
+  {{rpad .Use .UsagePadding }} {{.Short}}{{end}}{{end}}
 {{end}}
 {{if .HasFlags}}Available Flags:
 {{.Flags.FlagUsages}}{{end}}{{if .HasParent}}{{if and (gt .Commands 0) (gt .Parent.Commands 1) }}
-Additional help topics: {{if gt .Commands 0 }}{{range .Commands}}{{if not .Runnable}} {{rpad .CommandPath .CommandPathPadding}} :: {{.Short}}{{end}}{{end}}{{end}}{{if gt .Parent.Commands 1 }}{{range .Parent.Commands}}{{if .Runnable}}{{if not (eq .Name $cmd.Name) }}{{end}}
-  {{rpad .CommandPath .CommandPathPadding}} :: {{.Short}}{{end}}{{end}}{{end}}{{end}}
-{{end}}{{if .HasSubCommands}}
-Use "{{.Root.Name}} help [command]" for more information about that command.{{end}}
-`
+Additional help topics: {{if gt .Commands 0 }}{{range .Commands}}{{if not .Runnable}} {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if gt .Parent.Commands 1 }}{{range .Parent.Commands}}{{if .Runnable}}{{if not (eq .Name $cmd.Name) }}{{end}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{end}}
+{{end}}{{if .HasSubCommands }}
+Use "{{.Root.Name}} help [command]" for more information about that command.{{end}}`
 	}
 }
 
@@ -211,7 +216,7 @@ func (c *Command) HelpTemplate() string {
 		return c.parent.HelpTemplate()
 	} else {
 		return `{{.Long | trim}}
-{{if .Runnable}}{{.UsageString}}{{end}}
+{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}
 `
 	}
 }
@@ -221,6 +226,45 @@ func (c *Command) resetChildrensParents() {
 	for _, x := range c.commands {
 		x.parent = c
 	}
+}
+
+func stripFlags(args []string) []string {
+	if len(args) < 1 {
+		return args
+	}
+
+	commands := []string{}
+
+	inQuote := false
+	for _, y := range args {
+		if !inQuote {
+			switch {
+			case strings.HasPrefix(y, "\""):
+				inQuote = true
+			case strings.Contains(y, "=\""):
+				inQuote = true
+			case !strings.HasPrefix(y, "-"):
+				commands = append(commands, y)
+			}
+		}
+
+		if strings.HasSuffix(y, "\"") && !strings.HasSuffix(y, "\\\"") {
+			inQuote = false
+		}
+	}
+
+	return commands
+}
+
+func argsMinusX(args []string, x string) []string {
+	newargs := []string{}
+
+	for _, y := range args {
+		if x != y {
+			newargs = append(newargs, y)
+		}
+	}
+	return newargs
 }
 
 // find the target command given the args and command tree
@@ -238,9 +282,27 @@ func (c *Command) Find(arrs []string) (*Command, []string, error) {
 
 	innerfind = func(c *Command, args []string) (*Command, []string) {
 		if len(args) > 0 && c.HasSubCommands() {
-			for _, cmd := range c.commands {
-				if cmd.Name() == args[0] {
-					return innerfind(cmd, args[1:])
+			argsWOflags := stripFlags(args)
+			if len(argsWOflags) > 0 {
+				matches := make([]*Command, 0)
+				for _, cmd := range c.commands {
+					if cmd.Name() == argsWOflags[0] || cmd.HasAlias(argsWOflags[0]) { // exact name or alias match
+						return innerfind(cmd, argsMinusX(args, argsWOflags[0]))
+					} else if EnablePrefixMatching {
+						if strings.HasPrefix(cmd.Name(), argsWOflags[0]) { // prefix match
+							matches = append(matches, cmd)
+						}
+						for _, x := range cmd.Aliases {
+							if strings.HasPrefix(x, argsWOflags[0]) {
+								matches = append(matches, cmd)
+							}
+						}
+					}
+				}
+
+				// only accept a single prefix match - multiple matches would be ambiguous
+				if len(matches) == 1 {
+					return innerfind(matches[0], argsMinusX(args, argsWOflags[0]))
 				}
 			}
 		}
@@ -250,8 +312,9 @@ func (c *Command) Find(arrs []string) (*Command, []string, error) {
 
 	commandFound, a := innerfind(c, arrs)
 
-	// if commander returned and not appropriately matched return nil & error
-	if commandFound.Name() == c.Name() && commandFound.Name() != arrs[0] {
+	// if commander returned and the first argument (if it exists) doesn't
+	// match the command name, return nil & error
+	if commandFound.Name() == c.Name() && len(arrs[0]) > 0 && commandFound.Name() != arrs[0] {
 		return nil, a, fmt.Errorf("unknown command %q\nRun 'help' for usage.\n", a[0])
 	}
 
@@ -292,9 +355,34 @@ func (c *Command) execute(a []string) (err error) {
 	if err != nil {
 		return err
 	} else {
+		// If help is called, regardless of other flags, we print that
+		if c.helpFlagVal {
+			c.Help()
+			return nil
+		}
+
+		c.preRun()
 		argWoFlags := c.Flags().Args()
 		c.Run(c, argWoFlags)
 		return nil
+	}
+}
+
+func (c *Command) preRun() {
+	for _, x := range initializers {
+		x()
+	}
+}
+
+func (c *Command) errorMsgFromParse() string {
+	s := c.flagErrorBuf.String()
+
+	x := strings.Split(s, "\n")
+
+	if len(x) > 0 {
+		return x[0]
+	} else {
+		return ""
 	}
 }
 
@@ -325,7 +413,7 @@ func (c *Command) Execute() (err error) {
 		if c.Runnable() {
 			err = c.execute([]string(nil))
 		} else {
-			c.Usage()
+			c.Help()
 		}
 	} else {
 		err = c.findAndExecute(args)
@@ -333,14 +421,31 @@ func (c *Command) Execute() (err error) {
 
 	// Now handle the case where the root is runnable and only flags are provided
 	if err != nil && c.Runnable() {
+		// This is pretty much a custom version of the *Command.execute method
+		// with a few differences because it's the final command (no fall back)
 		e := c.ParseFlags(args)
 		if e != nil {
+			// Flags parsing had an error.
+			// If an error happens here, we have to report it to the user
+			c.Println(c.errorMsgFromParse())
+			c.Usage()
 			return e
 		} else {
+			// If help is called, regardless of other flags, we print that
+			if c.helpFlagVal {
+				c.Help()
+				return nil
+			}
+
 			argWoFlags := c.Flags().Args()
 			if len(argWoFlags) > 0 {
+				// If there are arguments (not flags) one of the earlier
+				// cases should have caught it.. It means invalid usage
+				// print the usage
 				c.Usage()
 			} else {
+				// Only flags left... Call root.Run
+				c.preRun()
 				c.Run(c, argWoFlags)
 				err = nil
 			}
@@ -358,6 +463,10 @@ func (c *Command) Execute() (err error) {
 
 func (c *Command) initHelp() {
 	if c.helpCommand == nil {
+		if !c.HasSubCommands() {
+			return
+		}
+
 		c.helpCommand = &Command{
 			Use:   "help [command]",
 			Short: "Help about any command",
@@ -374,6 +483,7 @@ func (c *Command) initHelp() {
 // Used for testing
 func (c *Command) ResetCommands() {
 	c.commands = nil
+	c.helpCommand = nil
 }
 
 func (c *Command) Commands() []*Command {
@@ -522,6 +632,20 @@ func (c *Command) Name() string {
 	return name
 }
 
+// Determine if a given string is an alias of the command.
+func (c *Command) HasAlias(s string) bool {
+	for _, a := range c.Aliases {
+		if a == s {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Command) NameAndAliases() string {
+	return strings.Join(append([]string{c.Name()}, c.Aliases...), ", ")
+}
+
 // Determine if the command is itself runnable
 func (c *Command) Runnable() bool {
 	return c.Run != nil
@@ -545,6 +669,7 @@ func (c *Command) Flags() *flag.FlagSet {
 			c.flagErrorBuf = new(bytes.Buffer)
 		}
 		c.flags.SetOutput(c.flagErrorBuf)
+		c.PersistentFlags().BoolVarP(&c.helpFlagVal, "help", "h", false, "help for "+c.Name())
 	}
 	return c.flags
 }
@@ -607,7 +732,6 @@ func (c *Command) persistentFlag(name string) (flag *flag.Flag) {
 // Parses persistent flag tree & local flags
 func (c *Command) ParseFlags(args []string) (err error) {
 	c.mergePersistentFlags()
-
 	err = c.Flags().Parse(args)
 
 	// The upstream library adds spaces to the error
